@@ -12,7 +12,7 @@ Usage:
     python3 bin_to_menu.py            # built-in camera (index 0)
     python3 bin_to_menu.py --camera 1 # another camera (e.g. iPhone Continuity Camera)
 
-Keys: Space = manual capture   R = reset background   A = toggle auto-detect   Q / Esc = quit
+Keys: S = start / stop camera   Space = manual capture   R = reset background   A = toggle auto-detect   Q / Esc = quit
 """
 
 import argparse
@@ -141,17 +141,28 @@ RESULT_SCHEMA = {
 }
 
 
+DOTENV_STATUS = ""   # shown in the log so key problems are easy to diagnose (never shows values)
+
+
 def load_dotenv(path: Path = APP_DIR / ".env"):
-    """Loads KEY=value lines from .env next to this script (without overriding real env vars)."""
+    """Loads KEY=value lines from .env next to this script.
+    A real, non-empty environment variable wins; an empty one does not block the .env value."""
+    global DOTENV_STATUS
     if not path.exists():
+        DOTENV_STATUS = f"no .env file at {path}"
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    loaded = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():   # utf-8-sig: tolerate a BOM
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, value = line.split("=", 1)
         name = name.removeprefix("export ").strip()
-        os.environ.setdefault(name, value.strip().strip('"').strip("'"))
+        value = value.strip().strip('"').strip("'")
+        if value and not os.environ.get(name):
+            os.environ[name] = value
+            loaded.append(f"{name} ({len(value)} chars)")
+    DOTENV_STATUS = f".env loaded: {', '.join(loaded) or 'nothing (already set in the shell, or empty)'}"
 
 
 load_dotenv()
@@ -462,17 +473,15 @@ class App:
     def __init__(self, root: tk.Tk, camera_index: int, save_images: bool):
         self.root = root
         self.save_images = save_images
-        self.cap = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
-        if not self.cap.isOpened():
-            self.cap = cv2.VideoCapture(camera_index)
-        if not self.cap.isOpened():
+        self.camera_index = camera_index
+        self.cap = None
+        self.running = False
+        if not self._open_camera():
             raise SystemExit(
                 f"Cannot open camera {camera_index}.\n"
                 "Allow camera access for Terminal / VS Code / Python in "
                 "System Settings → Privacy & Security → Camera."
             )
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
         self.has_key = has_credentials()
         self.recognizer = FoodRecognizer()
@@ -501,6 +510,7 @@ class App:
         self.root.after(100, self._poll_results)
         self._log_line(f"System started   camera: {camera_index}   model: {self._model()}   "
                        f"face detection: {self.faces.backend}", "muted")
+        self._log_line(DOTENV_STATUS, "muted")
         if not self.has_key:
             self._log_line("⚠️ ANTHROPIC_API_KEY is not set, so photos cannot be analysed. "
                            "Quit, run `export ANTHROPIC_API_KEY=sk-ant-...` in this terminal, then start again.", "error")
@@ -523,6 +533,10 @@ class App:
         style.configure("TCheckbutton", background=PANEL, foreground=FG)
         style.map("TCheckbutton", background=[("active", PANEL)])
         style.configure("TButton", padding=6)
+        style.configure("Stop.TButton", background=RED, foreground="white", font=("Helvetica", 13, "bold"))
+        style.map("Stop.TButton", background=[("active", "#e05555")])
+        style.configure("Start.TButton", background=GREEN, foreground="#0b2e1f", font=("Helvetica", 13, "bold"))
+        style.map("Start.TButton", background=[("active", "#35b87c")])
 
         self.log_font = tkfont.Font(family="Menlo", size=12)
         self.log_bold = tkfont.Font(family="Menlo", size=12, weight="bold")
@@ -550,6 +564,9 @@ class App:
 
         controls = tk.Frame(left, bg=PANEL)
         controls.pack(fill="x", pady=(8, 0))
+        self.run_btn = ttk.Button(controls, text="■ Stop (S)", style="Stop.TButton", width=10,
+                                  command=self.toggle_running)
+        self.run_btn.pack(side="left", padx=6, pady=6)
         ttk.Button(controls, text="📸 Capture now (Space)", command=self.manual_capture).pack(side="left", padx=6, pady=6)
         ttk.Button(controls, text="↺ Reset background (R)", command=self.reset_background).pack(side="left", padx=4)
         ttk.Checkbutton(controls, text="Auto-detect (A)", variable=self.auto_mode).pack(side="left", padx=6)
@@ -607,6 +624,7 @@ class App:
 
     def _bind_keys(self):
         self.root.bind("<space>", lambda e: self.manual_capture())
+        self.root.bind("<KeyPress-s>", lambda e: self.toggle_running())
         self.root.bind("<KeyPress-r>", lambda e: self.reset_background())
         self.root.bind("<KeyPress-a>", lambda e: self.auto_mode.set(not self.auto_mode.get()))
         self.root.bind("<KeyPress-q>", lambda e: self.close())
@@ -616,8 +634,54 @@ class App:
         self.root.bind("<Command-minus>", lambda e: self._zoom_log(-1))
 
     # ---------- Main loop ----------
+    def _open_camera(self) -> bool:
+        cap = cv2.VideoCapture(self.camera_index, cv2.CAP_AVFOUNDATION)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(self.camera_index)
+        if not cap.isOpened():
+            return False
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.cap, self.running = cap, True
+        return True
+
+    def toggle_running(self):
+        self.stop() if self.running else self.start()
+
+    def start(self):
+        if self.running:
+            return
+        if not self._open_camera():
+            self._log_line(f"Cannot open camera {self.camera_index} — is another app using it?", "error")
+            return
+        self.trigger.reset()   # the scene may have changed while stopped
+        self.run_btn.configure(text="■ Stop (S)", style="Stop.TButton")
+        self._log_line(f"▶ Started   {datetime.now():%H:%M:%S}   (keep the frame empty for a moment to set the background)", "muted")
+
+    def stop(self):
+        if not self.running:
+            return
+        self.running = False
+        if self.cap is not None:
+            self.cap.release()   # turns the camera (and its green light) off
+            self.cap = None
+        self.latest_frame = None
+        self.trigger.progress = 0.0
+        self.trigger.status = "Stopped — press Start (S) to resume"
+        self.run_btn.configure(text="▶ Start (S)", style="Start.TButton")
+        self._show_stopped_screen()
+        self._log_line(f"■ Stopped   {datetime.now():%H:%M:%S}   camera off", "muted")
+
+    def _show_stopped_screen(self):
+        self.video.delete("all")
+        self._video_item = None
+        cw, ch = self.video.winfo_width(), self.video.winfo_height()
+        self.video.create_text(cw // 2, ch // 2 - 14, text="Camera stopped", fill=FG, font=("Helvetica", 22, "bold"))
+        self.video.create_text(cw // 2, ch // 2 + 18, text="Press ▶ Start or S to resume", fill=MUTED,
+                               font=("Helvetica", 14))
+
     def _tick(self):
-        ok, raw = self.cap.read()
+        ok, raw = self.cap.read() if self.running else (False, None)
         if ok:
             self.faces.update(raw)   # always tracked: also used to ignore head motion
             frame = self.faces.blur(raw) if self.blur_faces.get() else raw
@@ -647,6 +711,7 @@ class App:
             draw.rectangle([0, 0, img.width - 1, img.height - 1], outline="white", width=12)
         self._video_img = ImageTk.PhotoImage(img)
         if self._video_item is None:
+            self.video.delete("all")   # clear the "Camera stopped" text
             self._video_item = self.video.create_image(cw // 2, ch // 2, image=self._video_img)
         else:
             self.video.coords(self._video_item, cw // 2, ch // 2)
@@ -885,7 +950,8 @@ class App:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def close(self):
-        self.cap.release()
+        if self.cap is not None:
+            self.cap.release()
         self.root.destroy()
 
 
