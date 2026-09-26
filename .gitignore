@@ -1,0 +1,11 @@
+# Secrets — never commit
+.env
+
+# Captured photos and detection logs (may contain people)
+captures/
+logs/
+
+# macOS / Python
+.DS_Store
+__pycache__/
+*.pyc

@@ -1,0 +1,6 @@
+anthropic>=1.8.0
+brotli>=1.2   # older Brotli crashes when decoding Claude responses
+opencv-python>=4.8
+numpy
+pillow
+pyobjc-framework-Vision   # on-device face detection (macOS)
