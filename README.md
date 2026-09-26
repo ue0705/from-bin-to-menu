@@ -29,9 +29,12 @@ Model: choose in the **Model** dropdown — *Fast · Haiku 4.5* (default — che
 
 Keys: S = start / stop camera (▶ Start / ■ Stop button) | Space = manual capture | R = reset background | A = toggle auto-detect | Q / Esc = quit
 
+## Cost display
+The log panel shows **This session** — the exact cost of every request so far, calculated from the token counts Claude returns (about US$0.0024–0.0036 per photo with Haiku 4.5; photos with more food items cost slightly more). Each log entry also shows its own cost. Anthropic has no API for reading the remaining credit balance; check it in the Console (Settings → Billing).
+
 ## Output
 - `captures/` — captured photos
-- `logs/detections.jsonl` — one record per detection (time, foods, grams, kcal)
+- `logs/detections.jsonl` — one record per detection (time, foods, grams, kcal, tokens, cost)
 
 ## Tips
 - Start with the camera looking at an empty scene (a table or tray area); the program uses it as the background. Press R whenever the background changes.

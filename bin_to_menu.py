@@ -52,6 +52,13 @@ APP_DIR = Path(__file__).resolve().parent
 CAPTURE_DIR = APP_DIR / "captures"
 LOG_FILE = APP_DIR / "logs" / "detections.jsonl"
 
+# Standard API prices, US$ per million tokens (input, output). Thinking tokens bill as output.
+PRICES_PER_MTOK = {
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-opus-5": (5.00, 25.00),
+}
+
 ICON_SIZE = 96                   # thumbnail icon size
 ICON_GAP = 14
 MARQUEE_SPEED = 1.2              # icon scroll speed (px / frame)
@@ -349,7 +356,18 @@ class FoodRecognizer:
         if response.stop_reason == "max_tokens":
             raise RuntimeError("Response was truncated (max_tokens)")
         text = next(b.text for b in response.content if b.type == "text")
-        return json.loads(text)
+        return json.loads(text), self._usage(response, model)
+
+    @staticmethod
+    def _usage(response, requested_model):
+        u = response.usage
+        tokens_in = (u.input_tokens or 0) + (getattr(u, "cache_creation_input_tokens", 0) or 0) \
+            + (getattr(u, "cache_read_input_tokens", 0) or 0)
+        tokens_out = u.output_tokens or 0
+        served = next((m for m in PRICES_PER_MTOK if str(response.model).startswith(m)), requested_model)
+        price_in, price_out = PRICES_PER_MTOK.get(served, (0.0, 0.0))
+        return {"input_tokens": tokens_in, "output_tokens": tokens_out,
+                "cost_usd": (tokens_in * price_in + tokens_out * price_out) / 1_000_000}
 
 
 # ───────────────────────── Auto-detection ─────────────────────────
@@ -466,6 +484,8 @@ class Detection:
     error: str = ""
     image_path: str = ""
     latency: float = 0.0
+    cost_usd: float = 0.0
+    tokens: int = 0
 
 
 # ───────────────────────── GUI ─────────────────────────
@@ -597,7 +617,9 @@ class App:
         ttk.Button(top, text="A+", width=3, command=lambda: self._zoom_log(+1)).pack(side="right")
         ttk.Button(top, text="A−", width=3, command=lambda: self._zoom_log(-1)).pack(side="right", padx=4)
         self.stats_lbl = tk.Label(right, text="", font=("Helvetica", 12), fg=MUTED, bg=PANEL, justify="left")
-        self.stats_lbl.pack(anchor="w", padx=12, pady=(2, 6))
+        self.stats_lbl.pack(anchor="w", padx=12, pady=(2, 0))
+        self.cost_lbl = tk.Label(right, text="", font=("Menlo", 12, "bold"), fg=AMBER, bg=PANEL, justify="left")
+        self.cost_lbl.pack(anchor="w", padx=12, pady=(2, 6))
 
         log_frame = tk.Frame(right, bg=PANEL)
         log_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -736,6 +758,14 @@ class App:
             text=f"Captures {len(self.detections)}   food {len(food)}   not food {nonfood}{avg}\n"
                  f"Estimated total: {grams:,.0f} g  /  {kcal:,.0f} kcal"
         )
+        spent = self._session_cost()
+        tokens = sum(d.tokens for d in self.detections)
+        self.cost_lbl.configure(
+            text=f"This session: US${spent:.4f}  ·  {tokens:,} tokens")
+
+    # ---------- Cost ----------
+    def _session_cost(self):
+        return sum(d.cost_usd for d in self.detections)
 
     # ---------- Capture & recognition ----------
     def manual_capture(self):
@@ -770,7 +800,9 @@ class App:
     def _worker(self, det: Detection):
         start = time.time()
         try:
-            result, err = self.recognizer.analyze(det.frame, det.model), None
+            (result, usage), err = self.recognizer.analyze(det.frame, det.model), None
+            det.cost_usd = usage["cost_usd"]
+            det.tokens = usage["input_tokens"] + usage["output_tokens"]
         except anthropic.AuthenticationError:
             result, err = None, "API key invalid (ANTHROPIC_API_KEY)"
         except anthropic.NotFoundError:
@@ -921,7 +953,8 @@ class App:
         self.log.insert("end", "─" * 36 + "\n", "muted")
         self.log.insert("end", f"#{det.id:04d}  ", "head")
         self.log.insert("end", det.timestamp.strftime("%a %d %b %Y  %H:%M:%S"), "time")
-        self.log.insert("end", f"   {det.latency:.1f} s · {det.model}\n", "muted")
+        cost = f" · US${det.cost_usd:.4f}" if det.status in ("food", "nonfood") else ""
+        self.log.insert("end", f"   {det.latency:.1f} s · {det.model}{cost}\n", "muted")
         self.log.insert("end", self._format_result(det) + "\n", det.status)
         self.log.mark_set(f"det{det.id}", start)
         self.log.mark_gravity(f"det{det.id}", "left")
@@ -945,6 +978,8 @@ class App:
             "error": det.error,
             "model": det.model,
             "latency_s": round(det.latency, 2),
+            "cost_usd": round(det.cost_usd, 6),
+            "tokens": det.tokens,
         }
         with LOG_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
