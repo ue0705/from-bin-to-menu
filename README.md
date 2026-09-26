@@ -27,7 +27,7 @@ On first launch macOS asks for camera permission. If it doesn't, allow Terminal 
 Options: `--camera 1` uses another camera (e.g. iPhone Continuity Camera); `--no-save` does not store photos (privacy mode).
 Model: choose in the **Model** dropdown — *Fast · Haiku 4.5* (default — cheapest and fastest), *Balanced · Sonnet 5*, *Accurate · Opus 5* (slowest, most expensive). The log shows the response time of every request.
 
-Keys: Space = manual capture | R = reset background | A = toggle auto-detect | Q / Esc = quit
+Keys: S = start / stop camera (▶ Start / ■ Stop button) | Space = manual capture | R = reset background | A = toggle auto-detect | Q / Esc = quit
 
 ## Output
 - `captures/` — captured photos
