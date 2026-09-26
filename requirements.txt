@@ -1,6 +1,6 @@
 anthropic>=1.8.0
 brotli>=1.2   # older Brotli crashes when decoding Claude responses
-opencv-python>=4.8
+opencv-python>=4.8,<5   # OpenCV 5 removed CascadeClassifier from the main package
 numpy
 pillow
 pyobjc-framework-Vision; sys_platform == "darwin"   # on-device face detection (macOS only; other systems fall back to OpenCV)

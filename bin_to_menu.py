@@ -193,12 +193,20 @@ class FaceBlurrer:
     """Finds faces with Apple Vision (fallback: OpenCV Haar cascades) and blurs them."""
 
     def __init__(self):
-        self.backend = "Apple Vision" if Vision is not None else "OpenCV Haar"
         if Vision is not None:
             self.vn_request = Vision.VNDetectFaceRectanglesRequest.alloc().init()
-        root = cv2.data.haarcascades
-        self.frontal = cv2.CascadeClassifier(root + "haarcascade_frontalface_default.xml")
-        self.profile = cv2.CascadeClassifier(root + "haarcascade_profileface.xml")
+        # Haar cascades are only a fallback. OpenCV 5 moved CascadeClassifier out of the main package.
+        self.haar = hasattr(cv2, "CascadeClassifier")
+        if self.haar:
+            root = cv2.data.haarcascades
+            self.frontal = cv2.CascadeClassifier(root + "haarcascade_frontalface_default.xml")
+            self.profile = cv2.CascadeClassifier(root + "haarcascade_profileface.xml")
+        if Vision is not None:
+            self.backend = "Apple Vision"
+        elif self.haar:
+            self.backend = "OpenCV Haar"
+        else:
+            self.backend = "unavailable — faces are NOT blurred"
         self.tracks = []          # [x, y, w, h, frames_left] in full-frame coordinates
         self.frame_no = 0
 
@@ -208,7 +216,7 @@ class FaceBlurrer:
                 return self._detect_vision(frame)
             except Exception:  # noqa: BLE001 — fall back to Haar for this frame
                 pass
-        return self._detect_haar(frame)
+        return self._detect_haar(frame) if self.haar else []
 
     def _detect_vision(self, frame):
         h, w = frame.shape[:2]
