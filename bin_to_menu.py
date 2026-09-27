@@ -61,7 +61,7 @@ PRICES_PER_MTOK = {
 
 ICON_SIZE = 96                   # thumbnail icon size
 ICON_GAP = 14
-MARQUEE_SPEED = 1.2              # icon scroll speed (px / frame)
+SLIDE_EASE = 0.22                # fraction of the remaining distance a new icon slides per frame
 SEND_MAX_SIDE = 1024             # longest side of the image sent to Claude (1024×576 ≈ 790 image tokens)
 
 # Auto-detection parameters
@@ -510,14 +510,15 @@ class App:
         self.detections: list[Detection] = []
         self.results_q: queue.Queue = queue.Queue()
         self.next_id = 1
-        self.marquee_offset = 0.0
+        self.strip_scroll = 0.0       # px scrolled back into history (0 = newest visible at the right edge)
+        self.strip_slide = 0.0        # px still to slide after a new photo arrives (animates down to 0)
+        self._drag_x = None
         self.flash_until = 0.0
         self.auto_mode = tk.BooleanVar(value=True)
         self.blur_faces = tk.BooleanVar(value=True)
         self.preset = tk.StringVar(value=DEFAULT_PRESET)
         self.latest_frame = None      # face-blurred when blurring is on
         self.pending = 0
-        self.strip_paused = False
         self._video_item = None
         self._last_key_warning = 0.0
 
@@ -605,9 +606,11 @@ class App:
 
         self.strip = tk.Canvas(left, height=ICON_SIZE + 44, bg=PANEL, highlightthickness=0)
         self.strip.pack(fill="x", pady=(6, 0))
-        self.strip.bind("<Button-1>", self._on_strip_click)
-        self.strip.bind("<Enter>", lambda e: setattr(self, "strip_paused", True))
-        self.strip.bind("<Leave>", lambda e: setattr(self, "strip_paused", False))
+        self.strip.bind("<ButtonPress-1>", self._on_strip_press)
+        self.strip.bind("<B1-Motion>", self._on_strip_drag)
+        self.strip.bind("<ButtonRelease-1>", self._on_strip_release)
+        self.strip.bind("<MouseWheel>", self._on_strip_wheel)          # trackpad / wheel
+        self.strip.bind("<Shift-MouseWheel>", self._on_strip_wheel)    # horizontal trackpad swipe
 
         # Right: log window
         right = tk.Frame(self.paned, bg=PANEL)
@@ -791,6 +794,7 @@ class App:
             cv2.imwrite(str(path), frame)
             det.image_path = str(path)
         self.detections.append(det)
+        self._on_new_icon()
         self.flash_until = time.time() + 0.25
         self.pending += 1
         self._log_line(f"#{det.id:04d}  {det.timestamp:%H:%M:%S}  "
@@ -856,32 +860,69 @@ class App:
         canvas.paste(img, (4, 4))
         return ImageTk.PhotoImage(canvas), caption, color
 
+    def _strip_max_scroll(self):
+        cell = ICON_SIZE + 8 + ICON_GAP
+        return max(0, len(self.detections) * cell - max(self.strip.winfo_width(), 100))
+
     def _render_strip(self):
+        """Newest photo sits at the right edge. Icons move only when a new photo arrives
+        (it slides in from the right) or when the user scrolls back through history."""
         c = self.strip
         c.delete("all")
         width = max(c.winfo_width(), 100)
+        height = ICON_SIZE + 44
         cell = ICON_SIZE + 8 + ICON_GAP
         n = len(self.detections)
         if n == 0:
-            c.create_text(width // 2, (ICON_SIZE + 44) // 2, text="Captured photos will scroll past here as icons",
+            c.create_text(width // 2, height // 2, text="Captured photos will appear here as icons",
                           fill=MUTED, font=("Helvetica", 13))
             return
 
-        if not self.strip_paused:
-            self.marquee_offset += MARQUEE_SPEED
-        total = n * cell
-        if total <= width:
-            # few icons: newest docks at the right edge
-            for i, det in enumerate(reversed(self.detections)):
-                self._draw_icon(det, width - (i + 1) * cell)
-        else:
-            # icons keep sliding left and loop once they overflow
-            x = -(self.marquee_offset % total)
-            while x < width:
-                for det in self.detections:   # oldest → newest, scrolling left
-                    if -cell < x < width:
-                        self._draw_icon(det, x)
-                    x += cell
+        self.strip_slide = 0.0 if self.strip_slide < 0.5 else self.strip_slide * (1 - SLIDE_EASE)
+        self.strip_scroll = min(max(self.strip_scroll, 0.0), self._strip_max_scroll())
+        offset = self.strip_slide + self.strip_scroll
+        hidden_old = 0
+        for i, det in enumerate(reversed(self.detections)):   # i = 0 is the newest
+            x = width - (i + 1) * cell + offset
+            if x >= width:
+                continue
+            if x + cell <= 0:
+                hidden_old += 1
+                continue
+            self._draw_icon(det, x)
+
+        if hidden_old:
+            c.create_rectangle(0, 0, 150, height, fill=PANEL, outline="")
+            c.create_text(75, height // 2 - 8, text=f"◀ {hidden_old} older", fill=FG, font=("Helvetica", 12, "bold"))
+            c.create_text(75, height // 2 + 12, text="swipe or drag", fill=MUTED, font=("Helvetica", 10))
+        if self.strip_scroll > 0:
+            c.create_rectangle(width - 130, 0, width, height, fill=PANEL, outline="")
+            c.create_text(width - 65, height // 2 - 8, text="newest ▶", fill=FG, font=("Helvetica", 12, "bold"))
+            c.create_text(width - 65, height // 2 + 12, text="click to jump", fill=MUTED, font=("Helvetica", 10),
+                          tags=("jump_newest",))
+            c.addtag_overlapping("jump_newest", width - 130, 0, width, height)
+
+    def _on_new_icon(self):
+        cell = ICON_SIZE + 8 + ICON_GAP
+        self.strip_scroll = 0.0                 # show the newest photo
+        self.strip_slide += cell                # and slide it in from the right
+
+    def _on_strip_wheel(self, event):
+        self.strip_scroll -= event.delta * 4    # macOS reports small deltas per trackpad step
+
+    def _on_strip_press(self, event):
+        self._drag_x = self._drag_start = event.x
+
+    def _on_strip_drag(self, event):
+        if self._drag_x is not None:
+            self.strip_scroll += event.x - self._drag_x
+            self._drag_x = event.x
+
+    def _on_strip_release(self, event):
+        moved = abs(event.x - (self._drag_start or event.x))
+        self._drag_x = None
+        if moved < 5:                           # a click, not a drag
+            self._on_strip_click(event)
 
     def _draw_icon(self, det, x):
         img, caption, color = det.thumb
@@ -895,10 +936,13 @@ class App:
                                font=("Helvetica", 10), tags=tag)
 
     def _on_strip_click(self, event):
-        item = self.strip.find_closest(event.x, event.y)
-        if not item:
+        items = self.strip.find_overlapping(event.x, event.y, event.x, event.y)
+        if not items:
             return
-        for tag in self.strip.gettags(item[0]):
+        if "jump_newest" in self.strip.gettags(items[-1]):
+            self.strip_scroll = 0.0
+            return
+        for tag in self.strip.gettags(items[-1]):
             if tag.startswith("det"):
                 self._highlight_log(int(tag[3:]))
                 self._show_detail(int(tag[3:]))

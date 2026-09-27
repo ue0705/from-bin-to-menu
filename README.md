@@ -6,7 +6,7 @@ Opens the Mac camera. When a new object is placed in front of it and held still 
 
 Food is recognised wherever it appears — on a tray, in a bin, held in a hand, packaged, or as a picture of food on a phone or screen.
 
-Layout: the live camera view on the left, a strip of photo icons below it that keeps scrolling sideways (click an icon for the full photo and details), and a detection log with date, time and response time on the right. Drag the divider between them to resize the log; A− / A+ (or ⌘− / ⌘+) change the log text size.
+Layout: the live camera view on the left, a strip of photo icons below it where each new photo slides in from the right (swipe or drag the strip to look back at older photos; click an icon for the full photo and details), and a detection log with date, time and response time on the right. Drag the divider between them to resize the log; A− / A+ (or ⌘− / ⌘+) change the log text size.
 
 **Privacy:** faces are detected on-device with Apple's Vision framework and blurred in the live view, in saved photos, and before any image is sent to Claude.
 
