@@ -10,6 +10,22 @@ Layout: the live camera view on the left, a strip of photo icons below it where 
 
 **Privacy:** faces are detected on-device with Apple's Vision framework and blurred in the live view, in saved photos, and before any image is sent to Claude.
 
+## Screenshot
+
+![From Bin to Menu running with five sample photos](docs/images/screenshot.jpg)
+
+The app analysing five sample photos with **Claude Haiku 4.5** (the default model). The results below are the real responses shown in the screenshot; the sample photos were fed in as the camera image.
+
+| # | Sample photo | Result | Estimated total | Response | Cost |
+|---|---|---|---|---|---|
+| 1 | <img src="docs/images/nonfood_stapler.jpg" width="120"> | 🚫 **Not food** — "Detected a stapler" | — | 2.6 s | US$0.0024 |
+| 2 | <img src="docs/images/waste_vegetables.jpg" width="120"> | 🍱 Food — oranges, apples, pears, eggplants and more (8 items) | 6,700 g · 2,895 kcal | 5.9 s | US$0.0040 |
+| 3 | <img src="docs/images/waste_pizza.jpg" width="120"> | 🍱 Food — sheet pizza | 1,200 g · 3,200 kcal | 3.8 s | US$0.0031 |
+| 4 | <img src="docs/images/tray_finland.jpg" width="120"> | 🍱 Food — meat and vegetable stew, bread, cucumber, milk | 915 g · 785 kcal | 6.3 s | US$0.0039 |
+| 5 | <img src="docs/images/tray_usda.jpg" width="120"> | 🍱 Food (picture of food) — sandwich, fruit salad, bean soup, milk | 800 g · 650 kcal | 5.3 s | US$0.0034 |
+
+These are Claude's visual estimates, not measurements, and they have not been checked against a scale — photo 2, for example, is a heap of produce whose weight is hard to judge from one angle. Calibrating the estimates against a kitchen scale is the Week 1–3 step in the project plan.
+
 ## Install and run
 ```bash
 pip3 install -r requirements.txt
@@ -40,3 +56,16 @@ The log panel shows **This session** — the exact cost of every request so far,
 - Start with the camera looking at an empty scene (a table or tray area); the program uses it as the background. Press R whenever the background changes.
 - Each object is analysed once; remove it or add a new item to trigger another capture. Automatic captures are at least 3 s apart, and head movements are ignored, so sitting in front of the camera does not trigger captures.
 - Grams and kcal are Claude's visual **estimates**, not measurements (see deck slide 7: Weeks 1–3 calibrate against a kitchen scale).
+
+## Image credits
+
+Sample photos from Wikimedia Commons, resized to 1280 px:
+
+| File | Source | Author | License |
+|---|---|---|---|
+| `docs/images/tray_usda.jpg` | [School lunch tray MyPlate 20210810-FNS-UNC-0015.jpg](https://commons.wikimedia.org/wiki/File:School_lunch_tray_MyPlate_20210810-FNS-UNC-0015.jpg) | U.S. Department of Agriculture | Public domain |
+| `docs/images/tray_finland.jpg` | [School lunch in ylästö school.jpg](https://commons.wikimedia.org/wiki/File:School_lunch_in_yl%C3%A4st%C3%B6_school.jpg) | Jukajuha | CC0 |
+| `docs/images/waste_pizza.jpg` | [Pizza with food waste.jpg](https://commons.wikimedia.org/wiki/File:Pizza_with_food_waste.jpg) | PizzaToast | CC0 |
+| `docs/images/waste_vegetables.jpg` | [Vegetables from a food retailer's container.jpg](https://commons.wikimedia.org/wiki/File:Vegetables_from_a_food_retailer%27s_container.jpg) | PizzaToast | CC0 |
+| `docs/images/nonfood_stapler.jpg` | [Stapler "Delfin" 1.jpg](https://commons.wikimedia.org/wiki/File:Stapler_%22Delfin%22_1.jpg) | OFFset32 at Polish Wikipedia | Public domain |
+
